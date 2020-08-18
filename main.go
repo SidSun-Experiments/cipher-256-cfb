@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"fmt"
@@ -9,15 +10,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aead/serpent"
+	"github.com/sid-sun/sealion"
 	"github.com/sid-sun/seaturtle"
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/crypto/twofish"
 )
 
-const version string = "2.0.0" // Program Version
+const version string = "1.0.0" // Program Version
 
 func main() {
 	var toEncrypt bool
-	var outputPath string
+	var outputPath, extension string
 	var err error
 
 	var blockCipher cipher.Block
@@ -25,8 +29,8 @@ func main() {
 	var progressStream chan int64
 	var wg sync.WaitGroup
 
-	if len(os.Args) == 4 || len(os.Args) == 5 {
-		switch os.Args[1] {
+	if len(os.Args) == 5 || len(os.Args) == 6 {
+		switch os.Args[2] {
 		case "-e", "--encrypt":
 			toEncrypt = true
 		case "-h", "--help":
@@ -38,21 +42,39 @@ func main() {
 		}
 
 		// If the input file does not exist, print so and quit
-		if !fileExists(os.Args[2]) {
-			fmt.Println("File:", os.Args[2], "seems to be nonexistent")
+		if !fileExists(os.Args[3]) {
+			fmt.Println("File:", os.Args[3], "seems to be nonexistent")
 			os.Exit(1)
 		}
 
 		// If there's a 5th distinct arguement, treat it as output file name
-		if len(os.Args) == 5 && os.Args[4] != os.Args[2] {
-			outputPath = os.Args[4]
+		if len(os.Args) == 6 && os.Args[3] != os.Args[5] {
+			outputPath = os.Args[5]
 		}
 
 		// Read contents of passphrase file and pass it through SHA-256
-		key := sha3.Sum256(readFromFile(os.Args[3]))
+		key := sha3.Sum256(readFromFile(os.Args[4]))
 
-		// Create the seaturtle cipher from the hash of passphrase
-		blockCipher, err = seaturtle.NewCipher(key[:])
+		switch os.Args[1] {
+		case "--aes":
+			blockCipher, err = aes.NewCipher(key[:])
+			extension = ".aes"
+		case "--seaturtle":
+			blockCipher, err = seaturtle.NewCipher(key[:])
+			extension = ".seat"
+		case "--sealion":
+			blockCipher, err = sealion.NewCipher(key[:])
+			extension = ".seal"
+		case "--twofish":
+			blockCipher, err = twofish.NewCipher(key[:])
+			extension = ".twofish"
+		case "--serpent":
+			blockCipher, err = serpent.NewCipher(key[:])
+			extension = ".serpent"
+		default:
+			fmt.Println("Please specify a valid cipher.")
+			os.Exit(1)
+		}
 		if err != nil {
 			panic(err.Error())
 		}
@@ -83,7 +105,7 @@ func main() {
 
 		// Start the reader
 		wg.Add(1)
-		go readInput(os.Args[2], blockCipher.BlockSize(), &inputStream, &progressStream, &wg)
+		go readInput(os.Args[3], blockCipher.BlockSize(), &inputStream, &progressStream, &wg)
 	} else {
 		// Check for version
 		if len(os.Args) > 1 {
@@ -99,7 +121,7 @@ func main() {
 	// If the ouput file was not specified append .seat to the input file
 	// And use it as output file path
 	if outputPath == "" {
-		outputPath = os.Args[2] + ".seat"
+		outputPath = os.Args[3] + extension
 	}
 
 	// Start the encrypt / decrypt and output writer routines
